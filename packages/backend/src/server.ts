@@ -227,6 +227,16 @@ export function createApp(adapter: RegistryAdapter, config: ServerConfig) {
   );
 
   app.post(
+    '/api/auth/logout',
+    route(async (req, res) => {
+      const header = req.headers.authorization ?? '';
+      const token = header.startsWith('Bearer ') ? header.slice(7) : undefined;
+      auth.logout(token);
+      res.json({ ok: true });
+    }),
+  );
+
+  app.post(
     '/api/recovery/initiate',
     route(async (req, res) => {
       const body = parse(recoverySchema, req.body);

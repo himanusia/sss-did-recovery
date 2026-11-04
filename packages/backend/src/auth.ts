@@ -154,6 +154,11 @@ export class AuthService {
     return { session, authKey: document.authKey, version: document.version };
   }
 
+  logout(token: string | undefined): void {
+    if (!token) throw new HttpError(401, 'missing bearer token', 'no_session');
+    if (!this.sessions.delete(token)) throw new HttpError(401, 'unknown session', 'no_session');
+  }
+
   session(token: string | undefined): SessionView {
     if (!token) throw new HttpError(401, 'missing bearer token', 'no_session');
     const session = this.sessions.get(token);

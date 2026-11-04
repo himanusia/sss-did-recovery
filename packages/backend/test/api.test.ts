@@ -110,6 +110,16 @@ describe('challenge-response authentication', () => {
     expect(session.body.document.authKey).toBe(wallet.address);
   });
 
+  it('ends a session on logout', async () => {
+    const { app, wallet, did } = await harness();
+    const loginResponse = await login(app, wallet, did);
+    const token = loginResponse.body.session.token;
+
+    await request(app).post('/api/auth/logout').set('Authorization', `Bearer ${token}`).expect(200);
+    const after = await request(app).get('/api/auth/session').set('Authorization', `Bearer ${token}`).expect(401);
+    expect(after.body.code).toBe('no_session');
+  });
+
   it('issues independent sessions for two apps with the same DID', async () => {
     const { app, wallet, did } = await harness();
     const first = await login(app, wallet, did, 'klinik');
