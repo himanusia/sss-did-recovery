@@ -54,7 +54,7 @@ async function main() {
     allowedOrigin: process.env.CORS_ORIGIN,
   };
 
-  const port = numberEnv('PORT', 8787);
+  const port = numberEnv('PORT', 8788);
   createApp(adapter, config).listen(port, () => {
     console.log(
       `[backend] listening on http://127.0.0.1:${port} | chain ${adapter.chainId} | registry ${adapter.registryAddress} | relayer ${adapter.relayerAddress} | recovery delay ${adapter.recoveryDelay}s`,
