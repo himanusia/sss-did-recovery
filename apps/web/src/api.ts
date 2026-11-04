@@ -140,6 +140,11 @@ export const api = {
     call<{ session: Session; document: DIDDocument }>('/api/auth/session', {
       headers: { Authorization: `Bearer ${token}` },
     }),
+  logout: (token: string) =>
+    call<{ ok: boolean }>('/api/auth/logout', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    }),
 
   initiateRecovery: (body: {
     did: string;

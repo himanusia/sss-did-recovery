@@ -67,7 +67,7 @@ export function IdentityScreen({
   if (!identity) {
     return (
       <div className="stack">
-        <div className="grid two">
+        <div className="grid two start">
           <Card
             title="Terbitkan identitas"
             subtitle="Satu DID untuk semua aplikasi. Pemulihan tidak bergantung pada satu perangkat."
@@ -100,13 +100,14 @@ export function IdentityScreen({
                 >
                   {[3, 4, 5].map((value) => (
                     <option key={value} value={value} disabled={value < threshold}>
-                      {value} guardian
+                      {value} share
                     </option>
                   ))}
                 </select>
               </label>
             </div>
 
+            <p className="hint config-hint">Satu share dipegang satu guardian.</p>
             <div className="guardian-inputs">
               {names.slice(0, shareCount).map((name, index) => (
                 <label className="field" key={index}>
@@ -239,6 +240,13 @@ export function IdentityScreen({
                 <span className="muted">tersebar ke guardian, terpisah dari perangkat ini</span>
               </div>
             </li>
+            <li>
+              <span className="dot dot-on" />
+              <div>
+                <strong>Relayer</strong>
+                <span className="muted">mengirim transaksi dan membayar gas, tanpa memegang kunci</span>
+              </div>
+            </li>
           </ul>
           <div className="actions actions-end">
             {identity.authPrivateKey ? (
@@ -300,13 +308,13 @@ export function IdentityScreen({
         <div className="grid three">
           <div className="metric">
             <span className="metric-label">Byte on-chain</span>
-            <span className="metric-value">160</span>
-            <span className="metric-note">doc 5 field + root, tanpa share</span>
+            <span className="metric-value">~96</span>
+            <span className="metric-note">dokumen + root, tanpa share</span>
           </div>
           <div className="metric">
             <span className="metric-label">Operasi klien</span>
-            <span className="metric-value">3</span>
-            <span className="metric-note">keygen, split, sign</span>
+            <span className="metric-value">4</span>
+            <span className="metric-note">keygen, split, commit, sign</span>
           </div>
           <div className="metric">
             <span className="metric-label">Auth key di server</span>

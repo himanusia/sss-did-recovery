@@ -22,7 +22,7 @@ export function Hash({
     <button
       type="button"
       className="hash"
-      title={value}
+      title={`${value} — klik untuk menyalin`}
       onClick={async () => {
         await navigator.clipboard.writeText(value);
         setCopied(true);
@@ -136,9 +136,10 @@ export function ShareCard({
       <div className="share-token mono">{short(guardian.token, 22, 8)}</div>
       <div className="share-foot">
         <span className="share-state">
-          {verified === true && <span className="ok-text">✓ commitment cocok</span>}
+          {verified === true && <span className="verified-text">✓ terverifikasi</span>}
           {verified === false && <span className="danger-text">✕ tidak cocok</span>}
-          {verified == null && <span className="dim">belum diverifikasi</span>}
+          {verified == null && !selectable && <span className="dim">bukti Merkle siap</span>}
+          {verified == null && selectable && <span className="dim">belum dicek</span>}
         </span>
         {onDownload && (
           <button
@@ -167,16 +168,19 @@ export function Countdown({ from, to }: { from: number; to: number }) {
   return (
     <div className="countdown">
       <div className="countdown-row">
-        <span className="countdown-label">timelock</span>
+        <span className="countdown-label">sisa timelock</span>
         <span className="countdown-value mono">
-          {remaining === 0 ? 'selesai' : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`}
+          {remaining === 0
+            ? 'selesai'
+            : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`}
         </span>
       </div>
       <div className="meter">
         <span style={{ width: `${Math.min(100, (elapsed / total) * 100)}%` }} />
       </div>
       <p className="countdown-note">
-        Jendela pembatalan: kunci lama masih bisa membatalkan permintaan sampai timelock habis.
+        Berakhir pukul {new Date(to * 1000).toLocaleTimeString('id-ID')} · kunci lama masih bisa membatalkan
+        permintaan sampai timelock habis.
       </p>
     </div>
   );

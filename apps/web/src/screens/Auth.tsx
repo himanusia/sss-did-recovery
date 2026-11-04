@@ -59,6 +59,21 @@ export function AuthScreen({
     }
   }
 
+  async function logout(appId: string) {
+    const current = sessions[appId];
+    if (!current) return;
+    try {
+      await api.logout(current.session.token);
+    } catch {
+      // the local session is dropped either way; a dead token is not an error for the user
+    }
+    setSessions((previous) => {
+      const next = { ...previous };
+      delete next[appId];
+      return next;
+    });
+  }
+
   async function check(appId: string) {
     const current = sessions[appId];
     if (!current) return;
@@ -123,7 +138,13 @@ export function AuthScreen({
             <Card key={appId} className="app-card">
               <div className="app-head">
                 <div className="app-id">
-                  <span className="app-mark">{appName.slice(0, 1)}</span>
+                  <span className="app-mark">
+                    {appName
+                      .split(' ')
+                      .map((word) => word[0])
+                      .slice(0, 2)
+                      .join('')}
+                  </span>
                   <div>
                     <h2 className="card-title">{appName}</h2>
                     <span className="mono dim">{appId}</span>
@@ -138,7 +159,7 @@ export function AuthScreen({
                     <KeyValue label="Latency">
                       <span className="mono">{result.latencyMs} ms</span>
                     </KeyValue>
-                    <KeyValue label="Auth key">
+                    <KeyValue label="Auth key DID">
                       <Hash value={result.session.authKey} head={10} tail={6} />
                     </KeyValue>
                   </div>
@@ -148,7 +169,8 @@ export function AuthScreen({
                     </KeyValue>
                     <KeyValue label="Kedaluwarsa">
                       <span className="mono">
-                        {new Date(result.session.expiresAt).toLocaleTimeString('id-ID')}
+                        {new Date(result.session.expiresAt).toLocaleTimeString('id-ID')} ·{' '}
+                        {Math.max(0, Math.round((result.session.expiresAt - Date.now()) / 60000))} mnt
                       </span>
                     </KeyValue>
                   </div>
@@ -178,6 +200,9 @@ export function AuthScreen({
                     <button className="btn btn-small btn-ghost" onClick={() => login(appId)} disabled={busy === appId}>
                       Login ulang
                     </button>
+                    <button className="btn btn-small btn-ghost" onClick={() => logout(appId)} disabled={busy === appId}>
+                      Keluar
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -200,25 +225,25 @@ export function AuthScreen({
         })}
       </div>
 
-      <Card title="Yang diverifikasi server" subtitle="Empat pemeriksaan sebelum sesi diterbitkan.">
+      <Card title="Yang diverifikasi server" subtitle="Empat pemeriksaan sebelum sesi diterbitkan; semua lulus untuk sesi di atas.">
         <div className="grid four">
           <div className="verify-item">
-            <span className="verify-num">1</span>
+            <span className="verify-num">✓ 1</span>
             <strong>DID terdaftar</strong>
             <span className="muted">resolusi dokumen dari registry</span>
           </div>
           <div className="verify-item">
-            <span className="verify-num">2</span>
+            <span className="verify-num">✓ 2</span>
             <strong>Signature valid</strong>
             <span className="muted">ecrecover terhadap auth key aktif</span>
           </div>
           <div className="verify-item">
-            <span className="verify-num">3</span>
+            <span className="verify-num">✓ 3</span>
             <strong>Nonce baru</strong>
             <span className="muted">sekali pakai, kedaluwarsa 120 detik</span>
           </div>
           <div className="verify-item">
-            <span className="verify-num">4</span>
+            <span className="verify-num">✓ 4</span>
             <strong>Domain cocok</strong>
             <span className="muted">app id + chain + registry</span>
           </div>

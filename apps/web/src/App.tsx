@@ -13,7 +13,7 @@ const TABS: { id: Tab; label: string; title: string; subtitle: string; index: st
   {
     id: 'identity',
     label: 'Identitas',
-    title: 'Identitas & share',
+    title: 'Identitas dan share',
     subtitle: 'Terbitkan DID, bagi recovery secret, simpan commitment on-chain',
     index: '01',
   },

@@ -171,11 +171,10 @@ export function RecoveryScreen({
               <Hash value={result.txHash} head={10} tail={6} />
             </KeyValue>
           </div>
-          <div className="actions">
-            <button className="btn btn-primary" onClick={goAuth}>
-              Lanjut ke autentikasi
-            </button>
-          </div>
+          <p className="footnote">
+            Recovery key tidak perlu disimpan: satu-satunya backup adalah share di bawah. Tanpa share,
+            pemulihan berikutnya tidak mungkin.
+          </p>
         </Card>
 
         <Card
@@ -190,6 +189,12 @@ export function RecoveryScreen({
                 onDownload={() => downloadEnvelope(guardian)}
               />
             ))}
+          </div>
+          <div className="actions">
+            <button className="btn btn-primary" onClick={goAuth}>
+              Bagikan share baru, lanjut ke autentikasi
+            </button>
+            <span className="hint">Set lama sudah tidak bisa dipakai lagi.</span>
           </div>
         </Card>
       </div>
@@ -323,7 +328,11 @@ export function RecoveryScreen({
           <Card
             title="Kumpulkan share"
             subtitle={`Butuh minimal ${owner.threshold} share valid. Share tidak dikirim ke server.`}
-            action={<span className="mono dim">{selected.length}/{owner.threshold}</span>}
+            action={
+              <span className={`pill ${selected.length >= owner.threshold ? 'pill-ok' : ''}`}>
+                {selected.length} dari {owner.threshold} share
+              </span>
+            }
           >
             <div className="share-grid dense">
               {owner.guardians.map((guardian) => (

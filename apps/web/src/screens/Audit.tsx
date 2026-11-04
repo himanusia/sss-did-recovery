@@ -11,12 +11,23 @@ const LABELS: Record<AuditEvent['type'], { title: string; tone: 'ok' | 'warn' | 
   'key-rotated': { title: 'Auth key dirotasi', tone: 'accent' },
 };
 
+function formatValue(key: string, value: string | number): string {
+  if (/(At|After)$/.test(key) && typeof value === 'number') {
+    return new Date(value * 1000).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+  }
+  return String(value);
+}
+
 function detailRows(event: AuditEvent): { label: string; value: string }[] {
-  const entries = Object.entries(event.data);
-  return entries.map(([key, value]) => ({
+  return Object.entries(event.data).map(([key, value]) => ({
     label: key.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase()),
-    value: String(value),
+    value: formatValue(key, value),
   }));
+}
+
+function fullTime(seconds: number | null): string {
+  if (!seconds) return '—';
+  return new Date(seconds * 1000).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'medium' });
 }
 
 export function AuditScreen({ store, health }: { store: Store; health: { chainId: number; registry: string } | null }) {
@@ -92,8 +103,9 @@ export function AuditScreen({ store, health }: { store: Store; health: { chainId
         {events && events.length === 0 && <p className="muted">Belum ada event.</p>}
         {events && events.length > 0 && (
           <ol className="timeline">
-            {events.map((event) => {
+            {events.map((event, index) => {
               const meta = LABELS[event.type];
+              const sameTransaction = index > 0 && events[index - 1].txHash === event.txHash;
               return (
                 <li key={`${event.txHash}-${event.logIndex}`} className="event">
                   <span className={`event-dot event-${meta.tone}`} />
@@ -102,12 +114,14 @@ export function AuditScreen({ store, health }: { store: Store; health: { chainId
                       <strong>{meta.title}</strong>
                       <Pill tone={meta.tone}>blok {event.blockNumber}</Pill>
                     </div>
-                    <div className="event-meta">
-                      <span className="mono dim">
-                        {event.timestamp ? new Date(event.timestamp * 1000).toLocaleString('id-ID') : '—'}
-                      </span>
-                      <Hash value={event.txHash} head={8} tail={6} />
-                    </div>
+                    {sameTransaction ? (
+                      <span className="event-same">lanjutan dari transaksi yang sama</span>
+                    ) : (
+                      <div className="event-meta">
+                        <span className="mono dim">{fullTime(event.timestamp)}</span>
+                        <Hash value={event.txHash} head={8} tail={6} />
+                      </div>
+                    )}
                     <div className="event-data">
                       {detailRows(event).map((row) => (
                         <span key={row.label}>
