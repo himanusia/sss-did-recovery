@@ -13,7 +13,8 @@
     "dev:web": "npm run dev -w @sss/web",
     "build": "npm run build -w @sss/web",
     "chain": "npm run node -w @sss/contracts",
-    "demo": "bash scripts/demo.sh"
+    "demo": "bash scripts/demo.sh",
+    "deploy:local": "npm run deploy:local -w @sss/contracts"
   },
   "devDependencies": {
     "tsx": "^4.19.2",
