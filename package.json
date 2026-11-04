@@ -12,7 +12,8 @@
     "dev:backend": "npm run dev -w @sss/backend",
     "dev:web": "npm run dev -w @sss/web",
     "build": "npm run build -w @sss/web",
-    "chain": "npm run node -w @sss/contracts"
+    "chain": "npm run node -w @sss/contracts",
+    "demo": "bash scripts/demo.sh"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

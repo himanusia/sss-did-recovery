@@ -12,7 +12,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "demo": "tsx scripts/e2e-demo.ts"
   },
   "dependencies": {
     "@sss/crypto": "0.1.0",
