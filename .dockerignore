@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.venv
+services/api/.venv
+services/api/__pycache__
+**/__pycache__
+docs/screenshots
+infra/besu/networkFiles

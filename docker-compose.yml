@@ -1,0 +1,144 @@
+# Private QBFT network (Hyperledger Besu) + off-chain PostgreSQL.
+#
+# Keys under infra/besu/networkFiles are generated demo fixtures: regenerating
+# them (scripts/besu-network.sh generate) changes the validator set and the
+# genesis file, so commit both together or not at all.
+name: sss-did
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sss
+      POSTGRES_USER: sss
+      POSTGRES_PASSWORD: sss
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sss -d sss"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  besu1:
+    image: hyperledger/besu:25.9.0
+    command: &besu-command
+      - --data-path=/var/lib/besu
+      - --genesis-file=/config/genesis.json
+      - --node-private-key-file=/config/key
+      - --network-id=1337
+      - --p2p-host=${BESU_P2P_HOST:-172.28.0.11}
+      - --p2p-port=30303
+      - --rpc-http-enabled=true
+      - --rpc-http-host=0.0.0.0
+      - --rpc-http-port=8545
+      - --rpc-http-api=ETH,NET,WEB3,QBFT,ADMIN,TXPOOL
+      - --rpc-http-cors-origins=*
+      - --host-allowlist=*
+      - --min-gas-price=0
+      - --bootnodes=enode://8514ec5afd8941d0d99e0ad9724a1d83bbec71cd37144ed30f999c9b721a765ec8a9570e0f3e7de189f3cfe48d615a8642a027e34e87e260a3ad8efea73ea82f@172.28.0.11:30303,enode://758d10e1c675d569ca55147a13b5d29f514741a5d85060230d995a9afed10e1566d872b4ddffd097bba429225ebe78f39f027a4c1789376dec001a8dacfc3ec4@172.28.0.12:30303,enode://a71f18166339ea2b802e082fb2963893c042446034c02b1c5a5f673af1c3d7021ef8376a2ff96b4ce3ef5229f08d3dd16ebd062d38f7219e09745d6339dd5bdc@172.28.0.13:30303,enode://8aea16cba01d51e4cfb2d7976ec306ae655afb11e70b7e7e5133e6aaddc3f1898f62c62f0525a4eb3778df99f5efbf3f4caf558477669bfe4c5d2efba8bf1f52@172.28.0.14:30303
+    volumes:
+      - besu1-data:/var/lib/besu
+      - ./infra/besu/networkFiles/genesis.json:/config/genesis.json:ro
+      - ./infra/besu/networkFiles/keys/0x4c063c5ee9c9c9dcefbeab4b4d21f0b6539be66e/key:/config/key:ro
+    ports:
+      - "8545:8545"
+    environment:
+      BESU_P2P_HOST: 172.28.0.11
+    networks:
+      besu:
+        ipv4_address: 172.28.0.11
+
+  besu2:
+    image: hyperledger/besu:25.9.0
+    command: *besu-command
+    volumes:
+      - besu2-data:/var/lib/besu
+      - ./infra/besu/networkFiles/genesis.json:/config/genesis.json:ro
+      - ./infra/besu/networkFiles/keys/0xa0e6c08e154a70df4caf858c4ee846627aa1cf92/key:/config/key:ro
+    environment:
+      BESU_P2P_HOST: 172.28.0.12
+    networks:
+      besu:
+        ipv4_address: 172.28.0.12
+    depends_on:
+      besu1:
+        condition: service_started
+
+  besu3:
+    image: hyperledger/besu:25.9.0
+    command: *besu-command
+    volumes:
+      - besu3-data:/var/lib/besu
+      - ./infra/besu/networkFiles/genesis.json:/config/genesis.json:ro
+      - ./infra/besu/networkFiles/keys/0xcf515ac76bf3a28097397d4d4607f03c33ec438d/key:/config/key:ro
+    environment:
+      BESU_P2P_HOST: 172.28.0.13
+    networks:
+      besu:
+        ipv4_address: 172.28.0.13
+    depends_on:
+      besu1:
+        condition: service_started
+
+  besu4:
+    image: hyperledger/besu:25.9.0
+    command: *besu-command
+    volumes:
+      - besu4-data:/var/lib/besu
+      - ./infra/besu/networkFiles/genesis.json:/config/genesis.json:ro
+      - ./infra/besu/networkFiles/keys/0xfb5ccd18fc2ef9e60667c9682b9d88c16e5ec732/key:/config/key:ro
+    environment:
+      BESU_P2P_HOST: 172.28.0.14
+    networks:
+      besu:
+        ipv4_address: 172.28.0.14
+    depends_on:
+      besu1:
+        condition: service_started
+
+  api:
+    build: ./services/api
+    environment:
+      RPC_URL: http://besu1:8545
+      CONTRACT_ADDRESS: ${CONTRACT_ADDRESS:-}
+      DATABASE_URL: postgresql://sss:sss@postgres:5432/sss
+      APPS: klinik:Portal Klinik,market:Pasar Digital
+      RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
+      GUARDIAN_COUNT: ${GUARDIAN_COUNT:-5}
+    ports:
+      - "8788:8788"
+    networks:
+      - default
+      - besu
+    depends_on:
+      postgres:
+        condition: service_healthy
+      besu1:
+        condition: service_started
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_started
+
+networks:
+  besu:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  pg-data:
+  besu1-data:
+  besu2-data:
+  besu3-data:
+  besu4-data:
