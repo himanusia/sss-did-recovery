@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Store } from '../identity';
-import { createIdentity, downloadEnvelope, type CreateStep } from '../identity';
-import { Card, Hash, KeyValue, Pill, ShareCard, StepList, short } from '../components';
+import { createIdentity, type CreateStep } from '../identity';
+import { api } from '../api';
+import { Card, Hash, KeyValue, Pill, StepList, short } from '../components';
 
 const STEPS = [
   { id: 'auth-key', label: 'Buat kunci autentikasi', detail: 'secp256k1, dibuat di perangkat' },
@@ -9,6 +10,7 @@ const STEPS = [
   { id: 'commitment', label: 'Komit root share', detail: 'Merkle root, bukan nilai share' },
   { id: 'signature', label: 'Tanda tangani registrasi', detail: 'EIP-191 atas digest kontrak' },
   { id: 'relay', label: 'Kirim ke registry', detail: 'relayer bayar gas, kunci tetap milik user' },
+  { id: 'distribute', label: 'Sebar share terenkripsi', detail: 'disegel per guardian, urutan acak' },
 ];
 
 export function IdentityScreen({
@@ -24,24 +26,38 @@ export function IdentityScreen({
 }) {
   const [threshold, setThreshold] = useState(3);
   const [shareCount, setShareCount] = useState(5);
-  const [names, setNames] = useState(['Laptop utama', 'Ponsel cadangan', 'Cloud vault', 'Kertas cetak', 'Rekan tepercaya']);
   const [running, setRunning] = useState(false);
   const [currentStep, setCurrentStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmLost, setConfirmLost] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [distributed, setDistributed] = useState<number | null>(null);
 
   const identity = store.identity;
+
+  useEffect(() => {
+    if (!identity) return;
+    let cancelled = false;
+    api
+      .shareStatus(identity.did)
+      .then((status) => {
+        if (!cancelled) setDistributed(status.count);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [identity?.did, identity?.version]);
 
   async function handleCreate() {
     setRunning(true);
     setError(null);
     setCurrentStep('auth-key');
     try {
-      const record = await createIdentity(threshold, shareCount, (step: CreateStep) => setCurrentStep(step), names);
+      const record = await createIdentity(threshold, shareCount, (step: CreateStep) => setCurrentStep(step));
       setCurrentStep(null);
       onStore({ identity: record, pending: null });
-      toast('Identitas terbit dan tercatat di registry', 'ok');
+      toast('Identitas terbit, share tersegel ke jaringan', 'ok');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       toast('Registrasi gagal', 'danger');
@@ -58,7 +74,7 @@ export function IdentityScreen({
   }
 
   function reset() {
-    localStorage.removeItem('sss-did-demo-v1');
+    localStorage.removeItem('sss-did-demo-v2');
     onStore({ identity: null, pending: null });
     setConfirmReset(false);
     toast('State demo dihapus dari perangkat ini', 'ok');
@@ -107,23 +123,10 @@ export function IdentityScreen({
               </label>
             </div>
 
-            <p className="hint config-hint">Satu share dipegang satu guardian.</p>
-            <div className="guardian-inputs">
-              {names.slice(0, shareCount).map((name, index) => (
-                <label className="field" key={index}>
-                  <span>Guardian {index + 1}</span>
-                  <input
-                    value={name}
-                    disabled={running}
-                    onChange={(event) => {
-                      const next = [...names];
-                      next[index] = event.target.value;
-                      setNames(next);
-                    }}
-                  />
-                </label>
-              ))}
-            </div>
+            <p className="hint config-hint">
+              Share tidak dipilih manual: setiap share disegel ke kunci publik satu guardian, urutannya diacak, dan
+              perangkat ini tidak menyimpan share setelah distribusi.
+            </p>
 
             <div className="actions">
               <button className="btn btn-primary" onClick={handleCreate} disabled={running}>
@@ -234,10 +237,10 @@ export function IdentityScreen({
               </div>
             </li>
             <li>
-              <span className="dot dot-on" />
+              <span className={`dot ${distributed ? 'dot-on' : 'dot-off'}`} />
               <div>
-                <strong>{identity.shareCount} share</strong>
-                <span className="muted">tersebar ke guardian, terpisah dari perangkat ini</span>
+                <strong>{distributed ?? identity.shareCount} share tersegel</strong>
+                <span className="muted">tersebar acak ke guardian, terenkripsi per penerima</span>
               </div>
             </li>
             <li>
@@ -286,21 +289,29 @@ export function IdentityScreen({
       </div>
 
       <Card
-        title="Share set"
-        subtitle="Setiap share punya bukti Merkle terhadap root on-chain. Berikan ke guardian lewat kanal terpisah."
+        title="Distribusi share"
+        subtitle="Satu share per guardian, disegel dengan kunci publik guardian itu. Urutan penempatan diacak di browser."
       >
-        <div className="share-grid">
-          {identity.guardians.map((guardian) => (
-            <ShareCard
-              key={guardian.envelope.index}
-              guardian={guardian}
-              onDownload={() => downloadEnvelope(guardian)}
-            />
-          ))}
+        <div className="grid three">
+          <div className="metric">
+            <span className="metric-label">Envelope tersimpan</span>
+            <span className="metric-value">{distributed ?? '—'}</span>
+            <span className="metric-note">ciphertext, bukan nilai share</span>
+          </div>
+          <div className="metric">
+            <span className="metric-label">Share di perangkat</span>
+            <span className="metric-value">0</span>
+            <span className="metric-note">tidak ada salinan lokal setelah distribusi</span>
+          </div>
+          <div className="metric">
+            <span className="metric-label">Pemetaan share ↔ guardian</span>
+            <span className="metric-value">acak</span>
+            <span className="metric-note">jaringan tidak tahu isi kotak yang dipegang siapa</span>
+          </div>
         </div>
         <p className="footnote">
-          Prototype menyimpan share di localStorage perangkat ini agar demo bisa jalan. Di produksi, share
-          dikirim ke perangkat guardian dan dienkripsi di sana.
+          Guardian di demo ini adalah layanan yang berjalan bersama API supaya seluruh cerita bisa dijalankan di satu
+          mesin. Kotaknya nyata: tanpa kunci privat guardian, isi envelope tidak bisa dibuka, termasuk oleh server.
         </p>
       </Card>
 
@@ -313,8 +324,8 @@ export function IdentityScreen({
           </div>
           <div className="metric">
             <span className="metric-label">Operasi klien</span>
-            <span className="metric-value">4</span>
-            <span className="metric-note">keygen, split, commit, sign</span>
+            <span className="metric-value">5</span>
+            <span className="metric-note">keygen, split, seal, commit, sign</span>
           </div>
           <div className="metric">
             <span className="metric-label">Auth key di server</span>

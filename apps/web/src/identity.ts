@@ -3,9 +3,7 @@ import {
   buildShareProof,
   combineShares,
   createAuthKeyPair,
-  decodeShare,
   didHash,
-  encodeShare,
   newDid,
   randomScalar,
   recoveryAddress,
@@ -13,15 +11,9 @@ import {
   splitSecret,
   toEnvelope,
   verifyShareProof,
-  type ShareEnvelope,
 } from '@sss/crypto';
-import { api, type DIDDocument } from './api';
-
-export interface GuardianShare {
-  name: string;
-  token: string;
-  envelope: ShareEnvelope;
-}
+import { api, type DIDDocument, type GuardianInfo, type SealedEnvelope } from './api';
+import { openSealed, sealTo, transportKeyPair, hexOf } from './sealing';
 
 export interface IdentityRecord {
   did: string;
@@ -33,7 +25,6 @@ export interface IdentityRecord {
   shareRoot: string;
   threshold: number;
   shareCount: number;
-  guardians: GuardianShare[];
   version: number;
   createdAt: number;
   registerTx: string;
@@ -50,7 +41,8 @@ export interface PendingRecovery {
   newShareRoot: string;
   newThreshold: number;
   newShareCount: number;
-  newGuardians: GuardianShare[];
+  /** Sealed envelopes for the next share set, deposited right after rotation. */
+  newEnvelopes: SealedEnvelope[];
 }
 
 export interface Store {
@@ -58,18 +50,12 @@ export interface Store {
   pending: PendingRecovery | null;
 }
 
-const STORAGE_KEY = 'sss-did-demo-v1';
-
-const DEFAULT_GUARDIANS = [
-  'Laptop utama',
-  'Ponsel cadangan',
-  'Cloud vault',
-  'Kertas cetak',
-  'Rekan tepercaya',
-];
+const STORAGE_KEY = 'sss-did-demo-v2';
+const LEGACY_KEY = 'sss-did-demo-v1';
 
 export function loadStore(): Store {
   try {
+    localStorage.removeItem(LEGACY_KEY);
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { identity: null, pending: null };
     const parsed = JSON.parse(raw) as Store;
@@ -88,36 +74,49 @@ export function clearStore(): void {
 }
 
 export interface Material {
-  secret: bigint;
   recoveryAddress: string;
   shareRoot: string;
-  guardians: GuardianShare[];
+  envelopes: SealedEnvelope[];
 }
 
-/** Generates the recovery secret and the committed share set. Client-side only. */
-export function createMaterial(threshold: number, shareCount: number, names = DEFAULT_GUARDIANS): Material {
+/**
+ * Splits the recovery secret and seals one envelope per guardian.
+ *
+ * The assignment is shuffled in the browser and the guardian list only contains
+ * public keys, so the network stores opaque boxes: it cannot tell which share
+ * index any guardian received. Plaintext shares exist only inside this function.
+ */
+export function createMaterial(threshold: number, shareCount: number, guardians: GuardianInfo[]): Material {
+  if (guardians.length < shareCount) {
+    throw new Error(`butuh ${shareCount} guardian aktif, jaringan hanya punya ${guardians.length}`);
+  }
   const secret = randomScalar();
   const shares = splitSecret(secret, threshold, shareCount);
   const root = shareRoot(shares);
-  const guardians = shares.map((share, position) => {
-    const name = names[position] ?? `Guardian ${share.index}`;
+
+  const order = Array.from({ length: guardians.length }, (_, index) => index);
+  for (let i = order.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+
+  const envelopes = shares.map((share, position) => {
+    const guardian = guardians[order[position] % guardians.length];
     const proof = buildShareProof(shares, share.index);
-    return {
-      name,
-      token: encodeShare(share),
-      envelope: toEnvelope(share, proof, root, name),
-    };
+    const payload = toEnvelope(share, proof, root, guardian.id);
+    const sealed = sealTo(new TextEncoder().encode(JSON.stringify(payload)), guardian.publicKey);
+    return { guardianId: guardian.id, ciphertext: sealed };
   });
-  return { secret, recoveryAddress: recoveryAddress(secret), shareRoot: root, guardians };
+
+  return { recoveryAddress: recoveryAddress(secret), shareRoot: root, envelopes };
 }
 
-export type CreateStep = 'auth-key' | 'shares' | 'commitment' | 'signature' | 'relay';
+export type CreateStep = 'auth-key' | 'shares' | 'commitment' | 'signature' | 'relay' | 'distribute';
 
 export async function createIdentity(
   threshold: number,
   shareCount: number,
   onStep: (step: CreateStep) => void,
-  names = DEFAULT_GUARDIANS,
 ): Promise<IdentityRecord> {
   onStep('auth-key');
   const auth = createAuthKeyPair();
@@ -125,7 +124,8 @@ export async function createIdentity(
   const hash = didHash(did);
 
   onStep('shares');
-  const material = createMaterial(threshold, shareCount, names);
+  const guardians = (await api.guardians()).guardians;
+  const material = createMaterial(threshold, shareCount, guardians);
 
   onStep('commitment');
   const payload = {
@@ -146,6 +146,9 @@ export async function createIdentity(
   onStep('relay');
   const registered = await api.register({ ...payload, signature });
 
+  onStep('distribute');
+  await api.depositShares({ did, shareRoot: material.shareRoot, envelopes: material.envelopes });
+
   return {
     did,
     didHash: hash,
@@ -155,21 +158,21 @@ export async function createIdentity(
     shareRoot: material.shareRoot,
     threshold,
     shareCount,
-    guardians: material.guardians,
     version: 1,
     createdAt: Date.now(),
     registerTx: registered.txHash,
   };
 }
 
-export type RecoveryStep = 'verify' | 'reconstruct' | 'signature' | 'relay';
+export type RecoveryStep = 'request' | 'verify' | 'reconstruct' | 'signature' | 'relay' | 'distribute';
 
 export async function beginRecovery(
   identity: IdentityRecord,
   threshold: number,
   shareCount: number,
 ): Promise<PendingRecovery> {
-  const material = createMaterial(threshold, shareCount);
+  const guardians = (await api.guardians()).guardians;
+  const material = createMaterial(threshold, shareCount, guardians);
   const auth = createAuthKeyPair();
   const result = await api.initiateRecovery({
     did: identity.did,
@@ -191,7 +194,7 @@ export async function beginRecovery(
     newShareRoot: material.shareRoot,
     newThreshold: threshold,
     newShareCount: shareCount,
-    newGuardians: material.guardians,
+    newEnvelopes: material.envelopes,
   };
 }
 
@@ -202,44 +205,64 @@ export interface RecoveryOutcome {
 }
 
 /**
- * Gathers shares, verifies every one against the on-chain root, reconstructs
- * the recovery secret locally, then signs the rotation. Shares and secret never
- * leave this function.
+ * Asks the network for k rewrapped shares, opens them with an ephemeral key,
+ * checks every Merkle proof against the on-chain root, reconstructs the secret
+ * locally and signs the rotation. No share or secret leaves this function.
  */
 export async function completeRecovery(
   identity: IdentityRecord,
   pending: PendingRecovery,
-  selected: GuardianShare[],
   onStep: (step: RecoveryStep) => void,
 ): Promise<RecoveryOutcome> {
-  onStep('verify');
-  const { document } = await api.getDid(identity.did);
-  if (selected.length < document.threshold) {
-    throw new Error(`butuh minimal ${document.threshold} share, baru ${selected.length} dipilih`);
-  }
-  for (const guardian of selected) {
-    if (!verifyShareProof(guardian.envelope.proof, document.shareRoot)) {
-      throw new Error(`share dari ${guardian.name} tidak cocok dengan commitment on-chain`);
-    }
-  }
-
-  onStep('reconstruct');
-  const secret = combineShares(selected.map((guardian) => decodeShare(guardian.token)));
-  const derived = recoveryAddress(secret);
-  if (derived.toLowerCase() !== document.recoveryKey.toLowerCase()) {
-    throw new Error('rekonstruksi gagal: secret tidak cocok dengan recovery key on-chain');
-  }
-
-  onStep('signature');
+  onStep('request');
   const prepared = await api.prepareRecovery(identity.did);
   if (prepared.request.requestId !== pending.requestId) {
     throw new Error('request pemulihan berubah, muat ulang halaman');
   }
+  const threshold = prepared.request.threshold;
+  const transport = transportKeyPair();
+  const bundle = await api.requestShares({
+    did: identity.did,
+    transportPublicKey: hexOf(transport.publicKey),
+    count: threshold,
+  });
+  if (bundle.shares.length < threshold) {
+    throw new Error(`jaringan hanya mengembalikan ${bundle.shares.length} share dari ${threshold} yang dibutuhkan`);
+  }
+
+  onStep('verify');
+  const shares = bundle.shares.map((share) => {
+    let envelope: { version: number; index: number; value: string; proof: Parameters<typeof verifyShareProof>[0] };
+    try {
+      envelope = JSON.parse(new TextDecoder().decode(openSealed(share.ciphertext, transport.privateKey)));
+    } catch {
+      throw new Error(`share dari ${share.label} tidak bisa dibuka dengan kunci transport ini`);
+    }
+    if (!verifyShareProof(envelope.proof, prepared.document.shareRoot)) {
+      throw new Error(`share dari ${share.label} tidak cocok dengan commitment on-chain`);
+    }
+    return { index: envelope.index, value: BigInt(envelope.value) };
+  });
+
+  onStep('reconstruct');
+  const secret = combineShares(shares);
+  if (recoveryAddress(secret).toLowerCase() !== prepared.document.recoveryKey.toLowerCase()) {
+    throw new Error('rekonstruksi gagal: secret tidak cocok dengan recovery key on-chain');
+  }
+
+  onStep('signature');
   const recoveryWallet = new Wallet(`0x${secret.toString(16).padStart(64, '0')}`);
   const signature = await recoveryWallet.signMessage(getBytes(prepared.digest));
 
   onStep('relay');
   const executed = await api.executeRecovery(identity.did, pending.requestId, signature);
+
+  onStep('distribute');
+  await api.depositShares({
+    did: identity.did,
+    shareRoot: pending.newShareRoot,
+    envelopes: pending.newEnvelopes,
+  });
 
   return {
     document: executed.document,
@@ -252,7 +275,6 @@ export async function completeRecovery(
       shareRoot: pending.newShareRoot,
       threshold: pending.newThreshold,
       shareCount: pending.newShareCount,
-      guardians: pending.newGuardians,
       version: executed.document.version,
     },
   };
@@ -265,14 +287,4 @@ export async function cancelRecovery(identity: IdentityRecord, pending: PendingR
   const signature = await wallet.signMessage(getBytes(prepared.digest));
   const result = await api.cancelRecovery(identity.did, pending.requestId, signature);
   return result.txHash;
-}
-
-export function downloadEnvelope(guardian: GuardianShare): void {
-  const blob = new Blob([JSON.stringify(guardian.envelope, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `share-${guardian.envelope.index}-${guardian.name.replace(/\s+/g, '-').toLowerCase()}.json`;
-  link.click();
-  URL.revokeObjectURL(url);
 }

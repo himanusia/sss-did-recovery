@@ -77,6 +77,30 @@ export interface DidResponse {
   recoveryDelay: number;
 }
 
+export interface GuardianInfo {
+  id: string;
+  label: string;
+  publicKey: string;
+}
+
+export interface SealedEnvelope {
+  guardianId: string;
+  ciphertext: string;
+}
+
+export interface ShareStatus {
+  did: string;
+  count: number;
+  guardians: string[];
+  shareRoot: string | null;
+}
+
+export interface ShareBundle {
+  guardianId: string;
+  label: string;
+  ciphertext: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -105,6 +129,19 @@ export const api = {
   getDid: (did: string) => call<DidResponse>(`/api/did/${encodeURIComponent(did)}`),
   audit: (did: string) =>
     call<{ did: string; didHash: string; events: AuditEvent[] }>(`/api/audit/${encodeURIComponent(did)}`),
+
+  guardians: () => call<{ guardians: GuardianInfo[] }>('/api/guardians'),
+  shareStatus: (did: string) => call<ShareStatus>(`/api/shares/${encodeURIComponent(did)}`),
+  depositShares: (body: { did: string; shareRoot: string; envelopes: SealedEnvelope[] }) =>
+    call<{ did: string; deposited: number }>('/api/shares/deposit', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  requestShares: (body: { did: string; transportPublicKey: string; count: number }) =>
+    call<{ requestId: string; count: number; shares: ShareBundle[] }>('/api/recovery/shares', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   prepareRegister: (body: {
     did: string;
@@ -159,7 +196,9 @@ export const api = {
       body: JSON.stringify(body),
     }),
   prepareRecovery: (did: string) =>
-    call<{ request: RecoveryRequest; digest: string; readyAt: number }>('/api/recovery/prepare', {
+    call<{ request: RecoveryRequest; digest: string; readyAt: number; document: DIDDocument }>(
+      '/api/recovery/prepare',
+      {
       method: 'POST',
       body: JSON.stringify({ did }),
     }),

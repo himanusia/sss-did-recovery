@@ -1,23 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
-import { verifyShareProof } from '@sss/crypto';
+import { useEffect, useState } from 'react';
 import type { DIDDocument } from '../api';
 import { api, ApiError } from '../api';
 import type { PendingRecovery, Store } from '../identity';
-import {
-  beginRecovery,
-  cancelRecovery,
-  completeRecovery,
-  downloadEnvelope,
-  type RecoveryOutcome,
-  type RecoveryStep,
-} from '../identity';
-import { Card, Countdown, Empty, Hash, KeyValue, Pill, ShareCard, StepList } from '../components';
+import { beginRecovery, cancelRecovery, completeRecovery, type RecoveryOutcome, type RecoveryStep } from '../identity';
+import { Card, Countdown, Empty, Hash, KeyValue, Pill, StepList } from '../components';
 
 const STEPS = [
-  { id: 'verify', label: 'Verifikasi share', detail: 'cek bukti Merkle terhadap root on-chain' },
+  { id: 'request', label: 'Minta share ke jaringan', detail: 'k guardian acak, dijawab ke kunci transport' },
+  { id: 'verify', label: 'Verifikasi share', detail: 'buka envelope, cek bukti Merkle on-chain' },
   { id: 'reconstruct', label: 'Rekonstruksi secret', detail: 'interpolasi Lagrange di browser' },
   { id: 'signature', label: 'Tanda tangan rotasi', detail: 'recovery key menandatangani kunci baru' },
   { id: 'relay', label: 'Eksekusi on-chain', detail: 'auth key lama dicabut, versi naik' },
+  { id: 'distribute', label: 'Sebar set share baru', detail: 'set lama mati bersama kunci lama' },
 ];
 
 export function RecoveryScreen({
@@ -38,7 +32,6 @@ export function RecoveryScreen({
   const [shareCount, setShareCount] = useState(identity ? identity.shareCount : 5);
   const [document, setDocument] = useState<DIDDocument | null>(null);
   const [delaySeconds, setDelaySeconds] = useState<number | null>(null);
-  const [selected, setSelected] = useState<number[]>([]);
   const [busy, setBusy] = useState<'start' | 'execute' | 'cancel' | null>(null);
   const [step, setStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,15 +59,6 @@ export function RecoveryScreen({
       cancelled = true;
     };
   }, [identity?.did, identity?.version, pending?.requestId]);
-
-  const verifiedShares = useMemo(() => {
-    const map = new Map<number, boolean | null>();
-    if (!identity || !document) return map;
-    for (const guardian of identity.guardians) {
-      map.set(guardian.envelope.index, verifyShareProof(guardian.envelope.proof, document.shareRoot));
-    }
-    return map;
-  }, [identity?.shareRoot, document?.shareRoot]);
 
   if (!identity) {
     return (
@@ -107,13 +91,11 @@ export function RecoveryScreen({
     if (!pending) return;
     setBusy('execute');
     setError(null);
-    setStep('verify');
+    setStep('request');
     try {
-      const guardians = owner.guardians.filter((guardian) => selected.includes(guardian.envelope.index));
-      const outcome = await completeRecovery(owner, pending, guardians, (next: RecoveryStep) => setStep(next));
+      const outcome = await completeRecovery(owner, pending, (next: RecoveryStep) => setStep(next));
       setResult(outcome);
       onStore({ identity: outcome.identity, pending: null });
-      setSelected([]);
       setDocument(outcome.document);
       toast('Akun dipulihkan. Auth key lama sudah dicabut.', 'ok');
     } catch (cause) {
@@ -151,8 +133,8 @@ export function RecoveryScreen({
             <div>
               <h2>Akun dipulihkan</h2>
               <p className="muted">
-                Auth key dirotasi ke kunci baru, versi dokumen naik ke {result.document.version}. Kunci lama
-                sudah tidak berlaku di semua aplikasi.
+                Auth key dirotasi ke kunci baru, versi dokumen naik ke {result.document.version}. Kunci lama sudah
+                tidak berlaku di semua aplikasi.
               </p>
             </div>
             <Pill tone="ok">v{result.document.version}</Pill>
@@ -172,29 +154,38 @@ export function RecoveryScreen({
             </KeyValue>
           </div>
           <p className="footnote">
-            Recovery key tidak perlu disimpan: satu-satunya backup adalah share di bawah. Tanpa share,
-            pemulihan berikutnya tidak mungkin.
+            Set share baru sudah disegel ke guardian sebelum halaman ini tampil. Tanpa share, pemulihan berikutnya
+            tidak mungkin.
           </p>
         </Card>
 
         <Card
           title="Share set baru"
-          subtitle="Secret lama sudah tidak dipakai. Bagikan set baru ini ke guardian, lewat kanal terpisah."
+          subtitle="Secret lama sudah tidak dipakai. Set baru sudah tersebar otomatis dengan root yang tercatat di dokumen."
         >
-          <div className="share-grid">
-            {result.identity.guardians.map((guardian) => (
-              <ShareCard
-                key={guardian.envelope.index}
-                guardian={guardian}
-                onDownload={() => downloadEnvelope(guardian)}
-              />
-            ))}
+          <div className="grid three">
+            <div className="metric">
+              <span className="metric-label">Share tersegel</span>
+              <span className="metric-value">{result.identity.shareCount}</span>
+              <span className="metric-note">satu per guardian, acak</span>
+            </div>
+            <div className="metric">
+              <span className="metric-label">Threshold</span>
+              <span className="metric-value">
+                {result.identity.threshold}-of-{result.identity.shareCount}
+              </span>
+              <span className="metric-note">berlaku untuk pemulihan berikutnya</span>
+            </div>
+            <div className="metric">
+              <span className="metric-label">Set lama</span>
+              <span className="metric-value">mati</span>
+              <span className="metric-note">root lama tidak lagi cocok</span>
+            </div>
           </div>
           <div className="actions">
             <button className="btn btn-primary" onClick={goAuth}>
-              Bagikan share baru, lanjut ke autentikasi
+              Lanjut ke autentikasi
             </button>
-            <span className="hint">Set lama sudah tidak bisa dipakai lagi.</span>
           </div>
         </Card>
       </div>
@@ -206,8 +197,8 @@ export function RecoveryScreen({
       {!owner.authPrivateKey && !isPending && (
         <div className="banner banner-warn">
           <div>
-            <strong>Perangkat hilang.</strong> Mulai permintaan pemulihan, lalu kumpulkan minimal{' '}
-            {owner.threshold} share dari guardian.
+            <strong>Perangkat hilang.</strong> Mulai permintaan pemulihan, lalu jaringan akan mengirim {owner.threshold}{' '}
+            share terenkripsi ke perangkat ini.
           </div>
         </div>
       )}
@@ -264,8 +255,8 @@ export function RecoveryScreen({
               </label>
             </div>
             <p className="muted recovery-copy">
-              Sistem membuat kunci autentikasi baru dan recovery secret baru di perangkat ini. Registry hanya
-              menerima alamat publik dan root share. Eksekusi menunggu timelock
+              Sistem membuat kunci autentikasi baru dan recovery secret baru di perangkat ini, lalu menyegel share-nya
+              untuk guardian. Registry hanya menerima alamat publik dan root share. Eksekusi menunggu timelock
               {delaySeconds !== null ? ` ${delaySeconds} detik` : ''} — jendela pembatalan untuk kunci lama.
             </p>
             <div className="actions">
@@ -293,7 +284,7 @@ export function RecoveryScreen({
             {!ready && pending && <Countdown from={pending.initiatedAt} to={pending.executeAfter} />}
             {ready && (
               <p className="ready-note">
-                Timelock selesai. Kumpulkan share di bawah, rekonstruksi secret di browser, lalu tanda tangani
+                Timelock selesai. Minta share dari jaringan, rekonstruksi secret di browser, lalu tanda tangani
                 rotasi.
               </p>
             )}
@@ -327,38 +318,29 @@ export function RecoveryScreen({
         <div className="grid two">
           <Card
             title="Kumpulkan share"
-            subtitle={`Butuh minimal ${owner.threshold} share valid. Share tidak dikirim ke server.`}
-            action={
-              <span className={`pill ${selected.length >= owner.threshold ? 'pill-ok' : ''}`}>
-                {selected.length} dari {owner.threshold} share
-              </span>
-            }
+            subtitle={`Jaringan memilih ${owner.threshold} guardian secara acak dan membungkus ulang share-nya ke kunci transport perangkat ini.`}
+            action={<span className="pill">{owner.threshold} share</span>}
           >
-            <div className="share-grid dense">
-              {owner.guardians.map((guardian) => (
-                <ShareCard
-                  key={guardian.envelope.index}
-                  guardian={guardian}
-                  selectable
-                  selected={selected.includes(guardian.envelope.index)}
-                  verified={verifiedShares.get(guardian.envelope.index) ?? null}
-                  onToggle={() =>
-                    setSelected((current) =>
-                      current.includes(guardian.envelope.index)
-                        ? current.filter((value) => value !== guardian.envelope.index)
-                        : [...current, guardian.envelope.index],
-                    )
-                  }
-                />
-              ))}
+            <div className="grid three">
+              <div className="metric">
+                <span className="metric-label">Guardian diminta</span>
+                <span className="metric-value">{owner.threshold}</span>
+                <span className="metric-note">dipilih acak oleh jaringan</span>
+              </div>
+              <div className="metric">
+                <span className="metric-label">Envelope</span>
+                <span className="metric-value">tersegel</span>
+                <span className="metric-note">hanya bisa dibuka perangkat ini</span>
+              </div>
+              <div className="metric">
+                <span className="metric-label">Share ke server</span>
+                <span className="metric-value">0</span>
+                <span className="metric-note">server hanya memindahkan ciphertext</span>
+              </div>
             </div>
             <div className="actions">
-              <button
-                className="btn btn-primary"
-                onClick={execute}
-                disabled={!ready || selected.length < owner.threshold || busy !== null}
-              >
-                {busy === 'execute' ? 'Memulihkan…' : 'Rekonstruksi & pulihkan akun'}
+              <button className="btn btn-primary" onClick={execute} disabled={!ready || busy !== null}>
+                {busy === 'execute' ? 'Memulihkan…' : 'Minta share, rekonstruksi & pulihkan'}
               </button>
               {!ready && <span className="hint">Tombol aktif setelah timelock selesai.</span>}
             </div>
@@ -381,9 +363,13 @@ export function RecoveryScreen({
                   {pending?.newThreshold}-of-{pending?.newShareCount}
                 </span>
               </KeyValue>
+              <KeyValue label="Envelope baru">
+                <span className="mono">{pending?.newEnvelopes.length ?? 0} tersegel</span>
+              </KeyValue>
             </div>
             <p className="footnote">
-              Setelah eksekusi, share lama mati bersama auth key lama. Pemulihan berikutnya memakai set baru ini.
+              Envelope baru sudah disegel ke guardian dan baru dikirim setelah rotasi, karena root-nya harus cocok
+              dengan dokumen yang baru.
             </p>
           </Card>
         </div>
