@@ -17,11 +17,13 @@ recovery policy, key revocation lists beyond the single auth key, production per
 
 | Component | Responsibility | Trust boundary |
 | --- | --- | --- |
-| `apps/web` | key generation, SSS split/combine, signing, operator UI | user device |
+| `apps/web` | key generation, SSS split/combine, sealing, signing, operator UI | user device |
 | `packages/crypto` | field arithmetic, commitments, DID identifiers | user device (also used by tests) |
-| `packages/backend` | challenges, signature verification, chain reads, gas relay | semi-trusted server |
+| `services/api` (Python/FastAPI) | challenges, signature verification, chain reads, gas relay, sealed share mailboxes | semi-trusted server |
+| `services/api/demo_client` | device-side reference client for tests and the e2e demo | test/demo only |
 | `packages/contracts` | DID documents, recovery state machine, events | public chain |
-| `packages/contracts` Hardhat | local EVM for development and tests | test only |
+| `infra/besu` | QBFT genesis, four validator keys, network entry point | private chain |
+| PostgreSQL | sessions, one-shot challenges, guardian envelopes, relay locks | semi-trusted server |
 
 The backend is deliberately **not** trusted with secrets. It can refuse service or censor a
 relay, but it cannot forge a login or a recovery: both require a signature by a key it never
@@ -108,8 +110,9 @@ active → recovered signer equals `authKey`. Only then is the challenge consume
 token issued. `app` is part of the signed message, so a signature harvested by app A is
 useless at app B; `nonce` and `expiresAt` block replay over time.
 
-Sessions are opaque random tokens with a TTL, held in memory. They are not JWT: the prototype
-has one instance, and opaque tokens can be revoked by dropping them.
+Sessions are opaque random tokens with a TTL, stored in PostgreSQL together with the
+challenges. They are not JWT: rows can be revoked by deleting them, and a second API instance
+sees the same sessions, which matters because the deployment is a container behind nginx.
 
 ## 6. Recovery state machine
 
@@ -149,9 +152,27 @@ Signature malleability is handled by rejecting `s > n/2` and non-canonical `v`.
 
 - Each leaf = `keccak256(index ‖ shareValue32)`.
 - Root = pairwise `keccak256(min ‖ max)`, duplicating the last node when a level is odd.
-- Only the root goes on-chain. The owner keeps one proof per share in the envelope.
+- Only the root goes on-chain. Each envelope carries its Merkle proof.
 - Before combining, the client verifies every selected share against the root read from the
   chain. A tampered or foreign share is rejected before it can corrupt the interpolation.
+
+### Sealed distribution and random selection
+
+The lecturer's note asked for **randomised sharing**: nobody, including the recovering device,
+should be able to say who holds which share.
+
+1. The device splits the secret and builds `n` envelopes (share + Merkle proof).
+2. It fetches the guardians' X25519 public keys, shuffles the assignment locally, and seals
+   each envelope with an ephemeral key (X25519 + HKDF-SHA256 + ChaCha20-Poly1305). Only
+   ciphertext reaches `POST /api/shares/deposit`; the device then drops its plaintext set.
+3. During recovery the device generates an ephemeral transport keypair and asks the network
+   for `k` shares. The API picks **k guardians at random**, each guardian unseals its own box
+   and reseals the payload to the device's transport key.
+4. The device opens the boxes, verifies the proofs, reconstructs, signs the rotation.
+
+Consequences: a database dump yields ciphertext; a guardian learns nothing about its own
+share without opening it; the device cannot target a specific guardian; and the API cannot
+read any share because it never holds a key that opens a box.
 
 The chosen construction is a **commitment**, not encryption: it proves a share belongs to the
 committed set without revealing it. Security relies on the 256-bit preimage resistance of
@@ -171,6 +192,11 @@ keccak; a share is a uniformly random field element, so guessing is infeasible.
 | Read the chain | no secrets | only public keys, root, metadata |
 | Front-run registration | griefing only | a DID is self-signed; an impostor cannot register a key they do not hold |
 
+| Read the database | ciphertext, sessions, challenges | sealed boxes; sessions are bearer tokens with a TTL |
+| Ask for a specific guardian's share | refused | the API samples guardians server-side |
+| Replay a sealed envelope to another device | fails | AAD binds both public keys; transport key is per recovery |
+| Submit two relays for one DID | duplicate recovery | `relay_locks` row plus contract guards |
+
 Residual risks (documented, not solved here):
 
 - A compromised *device with the auth key present* can cancel a legitimate recovery. This is
@@ -179,14 +205,18 @@ Residual risks (documented, not solved here):
   social decision.
 - The relayer can refuse to submit transactions (censorship) or leak metadata (timing, DID
   usage). A production design needs multiple relayers and/or user-paid gas.
-- Shares stored on the demo device (localStorage) are not protected. Real deployments must
-  encrypt per guardian and keep shares off the recovering device until needed.
+- The demo keeps the pending share set as ciphertext in localStorage so a page reload does
+  not lose the request; the plaintext secret is reconstructed only in memory and never
+  persisted. A production client would keep the pending set in device secure storage.
+- Guardians are services co-located with the API: the custody model is real, the social and
+  transport layer is not.
 
 ## 9. Data minimisation
 
 On-chain: 20 + 20 + 32 + 2 + ~13 bytes per document, plus one event per action. No name,
-email, device id, IP or share. Off-chain: nothing persistent in the prototype (sessions and
-challenges are in-memory maps).
+email, device id, IP or share. Off-chain: sessions and challenges with TTL, sealed envelopes
+(ciphertext only), a row per share request recording *which* guardians served it, and relay
+locks. No plaintext share, no secret, no personal data.
 
 ## 10. Failure behaviour
 
@@ -198,9 +228,11 @@ challenges are in-memory maps).
 
 ## 11. Production path
 
-1. Move sessions and challenges to a shared store (Redis) and add rate limiting.
+1. Add rate limiting and monitoring; sessions already live in PostgreSQL and can move to a
+   shared cache if the load grows.
 2. Multi-relayer with per-user quotas; optionally let users pay their own gas.
-3. Guardian delivery service with end-to-end encrypted envelopes, or QR/paper handoff.
+3. Split the guardian services out of the API process, each with its own key store and
+   delivery channel; the sealed-envelope protocol does not change.
 4. Replace the custom DID method with `did:ethr`/`did:key` resolution and a W3C document.
 5. Contract review: reentrancy is absent (no external calls), but storage layout, upgrade
    strategy and denial-of-service via request spam need review.

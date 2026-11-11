@@ -3,19 +3,24 @@
 Short ADRs for choices that a reviewer would otherwise question. Each entry records the
 context, the decision, and what it costs.
 
-## ADR-01 — TypeScript backend instead of Go/Python
+## ADR-01 — Python backend (spec says Go or Python)
 
-**Context.** The specification leaves the backend language as TBD (Go or Python).
+**Context.** The specification leaves the backend language open: "Go or Python (TBD)". The
+first iteration used Node/TypeScript to share code with the browser, which quietly ignored
+the column in the specification.
 
-**Decision.** Node + TypeScript, in the same workspace as the crypto library and the web app.
+**Decision.** Python 3.12 + FastAPI, in `services/api`, with `pytest` and PostgreSQL.
 
-**Why.** The share and commitment code is the part most likely to drift between client and
-server. One implementation in one language removes that class of bug; the same module is used
-by the browser, the tests and the e2e script. `ethers` also gives EIP-712 verification and
-contract bindings without a second toolchain.
+**Why.** It matches the specification instead of arguing with it, and Python has first-class
+Ethereum tooling (`web3.py` for contract calls and relaying, `eth_account` for EIP-191/EIP-712
+recovery). The device-side crypto stays in TypeScript because it must run in the browser;
+`services/api/demo_client` is the Python mirror used by tests and the e2e demo, and the two
+implementations are checked against each other (same share vectors, same sealed-box format,
+byte-identical ciphertext handling).
 
-**Cost.** Weaker isolation than Go, and Node is not the typical choice for a high-throughput
-relayer. The API surface here is small and stateless; this is acceptable for a prototype.
+**Cost.** Two implementations of the client maths. Mitigated by keeping the Python copy in
+`demo_client/` (not imported by request handlers) and by the e2e demo, which fails if the two
+disagree on roots, proofs or addresses.
 
 ## ADR-02 — Random DID identifier, not a key-derived one
 
@@ -87,32 +92,38 @@ public ledger. It also keeps the document small enough to read on every login.
 **Cost.** The client must carry a proof per share (33-byte share + ~log2(n) hashes). This is
 trivial compared to the share itself.
 
-## ADR-07 — Hardhat EVM for the prototype, Besu as the deployment target
+## ADR-07 — A real QBFT network, not a Hardhat stand-in
 
-**Context.** The specification names Hyperledger Besu (Ethereum-compatible, permissioned).
+**Context.** The specification names Hyperledger Besu with proof of authority on a private
+network. The previous iteration only ran Hardhat's in-process EVM and left Besu as future work.
 
-**Decision.** Develop and test against Hardhat's EVM; keep the contract free of any
-Hardhat-specific behaviour. No Besu network is provisioned in this repository.
+**Decision.** Provision Besu QBFT with **four validators** (`infra/besu`), generated with
+Besu's own `operator generate-blockchain-config`; deploy the registry to it; run the e2e demo
+against it. Hardhat's in-process EVM remains the runner for contract unit tests only.
 
-**Why.** The contract is plain Solidity 0.8.24 and uses only `ecrecover`/`keccak256`, so it is
-portable. A local in-process EVM gives deterministic tests (timelock via `evm_increaseTime`)
-without a 1 GB image in the loop.
+**Why.** "Ethereum-compatible" is not the same as "runs on the chosen network". Provisioning it
+exercises the real path: 2 s blocks, a validator set in `extraData` (which needs the POA
+middleware in web3), zero gas price, and transactions that actually take a block to confirm.
 
-**Cost.** Besu-specific behaviour (permissioning, gas price zero, private transactions) is not
-exercised. Current Besu images dropped `--network=dev`, so a local Besu run needs a QBFT genesis;
-that is deliberately not shipped half-working. The prototype does not claim to validate Besu.
+**Cost.** Generated validator keys and genesis are committed as **demo fixtures**; they must
+never be reused on a reachable network. Unit tests still use the in-process EVM because
+spinning four containers per test is slow; the e2e script is the Besu gate.
 
-## ADR-08 — In-memory challenges and sessions
+## ADR-08 — PostgreSQL for challenges, sessions, envelopes and locks
 
-**Context.** NFRs require nonces to be random, single-use and expiring; they do not require
-persistence across restarts.
+**Context.** NFRs require one-shot challenges and revocable sessions; the specification lists
+PostgreSQL as the off-chain database.
 
-**Decision.** `Map`s in the API process, with TTL checks and deletion on use.
+**Decision.** `challenges`, `sessions`, `guardians`, `guardian_envelopes`, `share_requests`,
+`relay_locks`, migrated on boot from `services/api/migrations`.
 
-**Why.** The prototype runs as one process. A shared store would add infrastructure without
-changing the protocol, and a restarted server invalidating sessions is acceptable (and safer).
+**Why.** A restarted API no longer logs everyone out, two API instances agree on challenges, and
+`relay_locks` serialises relayer transactions per DID in a way an in-process `Set` cannot. The
+chain stays the source of truth for identity documents; the database only holds what is
+useless to an attacker: expired challenges, bearer sessions, and sealed ciphertext.
 
-**Cost.** Not horizontally scalable; restart drops sessions. Documented as a production gap.
+**Cost.** One more service to run and a migration step on startup. Both are handled by
+`scripts/stack.sh` and by the container healthchecks.
 
 ## ADR-09 — No oracle
 
@@ -126,8 +137,30 @@ account recovery.
 
 ## ADR-10 — Indonesian UI, English code and docs
 
-**Decision.** User-facing copy is Indonesian (the course context and the report are in
-Indonesian); identifiers, commits and documentation are English.
+**Decision.** User-facing copy is Indonesian (the course context is Indonesian); identifiers,
+commits and documentation are English.
 
 **Why.** Matches how the deliverable will be reviewed and demonstrated, and keeps the codebase
 consistent with the rest of the author's repositories.
+
+## ADR-11 — Randomised sealed distribution instead of share downloads
+
+**Context.** The specification's discussion asks for randomised sharing: "setiap orang tidak
+tahu siapa yang memegang apa; sistem yang akan request dan gabungkan secrets". The previous
+iteration let the user download one envelope per named guardian and keep the whole set in
+localStorage — the opposite of that requirement.
+
+**Decision.** The device seals one envelope per guardian with X25519 + HKDF-SHA256 +
+ChaCha20-Poly1305, shuffles the assignment, uploads only ciphertext, and drops its plaintext
+set. Recovery asks the network for `k` shares; the API samples guardians server-side and each
+guardian rewraps to the device's ephemeral transport key.
+
+**Why.** Three properties fall out: the server never sees a share (only ciphertext), a guardian
+cannot tell which share index it holds without opening its box, and the recovering device
+cannot target a specific holder. It is also the only way to make FR-13 ("distribute shares
+securely") true rather than "implemented with a manual file handoff".
+
+**Cost.** Guardians are simulated inside the API process for reproducibility, so the social and
+transport layer is documented as the main external-validity gap. The protocol itself is real:
+boxes are opened with per-guardian keys, and the e2e test asserts the API's ciphertext does not
+contain a plaintext share token.
