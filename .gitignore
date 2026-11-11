@@ -9,5 +9,10 @@ coverage/
 packages/contracts/artifacts/
 packages/contracts/cache/
 packages/contracts/typechain-types/
-packages/contracts/deployments/localhost.json
+packages/contracts/deployments/
 .chain.log
+services/api/.venv/
+services/api/**/__pycache__/
+services/api/.pytest_cache/
+services/api/**/*.pyc
+

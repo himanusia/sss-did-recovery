@@ -2,22 +2,22 @@
   "name": "sss-did-recovery",
   "version": "0.1.0",
   "private": true,
-  "description": "Prototype: decentralized account recovery for cross-platform authentication using Shamir's Secret Sharing",
+  "description": "Decentralized account recovery for cross-platform authentication using Shamir's Secret Sharing (IF4035 Blockchain)",
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
   "scripts": {
-    "test": "npm run test -w @sss/crypto && npm run test -w @sss/contracts && npm run test -w @sss/backend",
-    "dev:backend": "npm run dev -w @sss/backend",
+    "stack": "bash scripts/stack.sh boot",
+    "dev": "bash scripts/stack.sh dev",
+    "deploy:besu": "bash scripts/stack.sh deploy",
+    "demo": "bash scripts/stack.sh demo",
+    "test": "npm run test -w @sss/crypto && npm run test -w @sss/contracts && npm run test:api",
+    "test:api": "cd services/api && uv run pytest",
     "dev:web": "npm run dev -w @sss/web",
-    "build": "npm run build -w @sss/web",
-    "chain": "npm run node -w @sss/contracts",
-    "demo": "bash scripts/demo.sh",
-    "deploy:local": "npm run deploy:local -w @sss/contracts"
+    "build": "npm run build -w @sss/web"
   },
   "devDependencies": {
-    "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   },
   "engines": {
