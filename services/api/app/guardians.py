@@ -56,6 +56,14 @@ class GuardianService:
             rows = conn.execute(
                 "SELECT id, label, public_key FROM guardians WHERE active ORDER BY id"
             ).fetchall()
+        if len(rows) < self.count:
+            # Self-heal: a truncated/cleaned database must not leave the
+            # network unable to accept shares until the next restart.
+            self.seed()
+            with self.db.connection() as conn:
+                rows = conn.execute(
+                    "SELECT id, label, public_key FROM guardians WHERE active ORDER BY id"
+                ).fetchall()
         return [
             {"id": row["id"], "label": row["label"], "publicKey": "0x" + row["public_key"].hex()}
             for row in rows
