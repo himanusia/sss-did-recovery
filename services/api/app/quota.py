@@ -15,7 +15,7 @@ from .errors import HttpError
 
 
 class RelayQuota:
-    def __init__(self, db: Database, limit_per_hour: int = 10) -> None:
+    def __init__(self, db: Database, limit_per_hour: int = 30) -> None:
         self.db = db
         self.limit = limit_per_hour
 

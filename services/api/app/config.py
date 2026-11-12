@@ -54,5 +54,5 @@ class Settings:
     cors_origin: str | None = field(default_factory=lambda: os.environ.get("CORS_ORIGIN") or None)
     guardian_count: int = field(default_factory=lambda: _positive_int("GUARDIAN_COUNT", 5))
     relay_quota_per_hour: int = field(
-        default_factory=lambda: _positive_int("RELAY_QUOTA_PER_HOUR", 10)
+        default_factory=lambda: _positive_int("RELAY_QUOTA_PER_HOUR", 30)
     )
