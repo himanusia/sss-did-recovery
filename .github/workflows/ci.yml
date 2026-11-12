@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sss_test
+          POSTGRES_USER: sss
+          POSTGRES_PASSWORD: sss
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sss -d sss_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Crypto suite
+        run: npm run test -w @sss/crypto
+
+      - name: Contract suite (in-process EVM)
+        run: npm run test -w @sss/contracts
+
+      - name: Web build
+        run: npm run build -w @sss/web
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: API dependencies
+        working-directory: services/api
+        run: uv sync --frozen
+
+      - name: API suite (PostgreSQL)
+        working-directory: services/api
+        env:
+          TEST_DATABASE_URL: postgresql://sss:sss@127.0.0.1:5432/sss_test
+        run: uv run pytest

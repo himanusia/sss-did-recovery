@@ -7,6 +7,7 @@ name: sss-did
 
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: sss
@@ -23,6 +24,7 @@ services:
       retries: 20
 
   besu1:
+    restart: unless-stopped
     image: hyperledger/besu:25.9.0
     command: &besu-command
       - --data-path=/var/lib/besu
@@ -52,6 +54,7 @@ services:
         ipv4_address: 172.28.0.11
 
   besu2:
+    restart: unless-stopped
     image: hyperledger/besu:25.9.0
     command: *besu-command
     volumes:
@@ -68,6 +71,7 @@ services:
         condition: service_started
 
   besu3:
+    restart: unless-stopped
     image: hyperledger/besu:25.9.0
     command: *besu-command
     volumes:
@@ -84,6 +88,7 @@ services:
         condition: service_started
 
   besu4:
+    restart: unless-stopped
     image: hyperledger/besu:25.9.0
     command: *besu-command
     volumes:
@@ -100,6 +105,7 @@ services:
         condition: service_started
 
   api:
+    restart: unless-stopped
     build: ./services/api
     environment:
       RPC_URL: http://besu1:8545
@@ -120,6 +126,7 @@ services:
         condition: service_started
 
   web:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: apps/web/Dockerfile

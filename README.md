@@ -42,6 +42,14 @@ commitments and an audit trail — never a share or a secret.
 Everything above is exercised by tests and by an end-to-end script against the real Besu
 network, not a Hardhat in-process chain.
 
+## Live deployment
+
+<https://sss.himanusia.com> — InstaBox VPS (4 vCPU / 8 GiB), four QBFT validators in Docker,
+PostgreSQL, Python API and the console behind nginx. Cloudflare Tunnel terminates TLS and
+forwards only the web container; Besu RPC and the API are bound to loopback and never exposed.
+`GET /api/health` reports the chain id, registry address and timelock. The machine suspends
+when idle; <https://s.himanusia.com/wake> resumes it.
+
 ## Screens
 
 | Identity | Authentication |
