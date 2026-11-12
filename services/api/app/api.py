@@ -15,6 +15,7 @@ from .config import Settings
 from .db import Database
 from .errors import ContractRevert, HttpError
 from .guardians import GuardianService, transport_public_of
+from .quota import RelayQuota
 from .types import (
     ChallengeRequest,
     DepositRequest,
@@ -39,6 +40,14 @@ def build_app(adapter, db: Database, guardians: GuardianService, settings: Setti
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    quota = RelayQuota(db, settings.relay_quota_per_hour)
+
+    def client_ip(request: Request) -> str:
+        forwarded = request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
 
     auth = AuthService(
         adapter=adapter,
@@ -139,7 +148,8 @@ def build_app(adapter, db: Database, guardians: GuardianService, settings: Setti
         return {"digest": digest}
 
     @app.post("/api/identity/register", status_code=201)
-    def register(body: RegisterRequest) -> dict:
+    def register(body: RegisterRequest, request: Request) -> dict:
+        quota.consume(client_ip(request))
         if body.didHash.lower() != hash_did(body.did):
             raise HttpError(400, "didHash does not match did", "did_mismatch")
         if adapter.get_document(body.didHash) is not None:
@@ -189,7 +199,8 @@ def build_app(adapter, db: Database, guardians: GuardianService, settings: Setti
 
     # ---------------------------------------------------------- recovery
     @app.post("/api/recovery/initiate", status_code=201)
-    def initiate_recovery(body: RecoveryInitiate) -> dict:
+    def initiate_recovery(body: RecoveryInitiate, request: Request) -> dict:
+        quota.consume(client_ip(request))
         did_hash, document, recovery = resolve(body.did)
         if not document["active"]:
             raise HttpError(409, "identity is not active", "inactive")
@@ -217,7 +228,8 @@ def build_app(adapter, db: Database, guardians: GuardianService, settings: Setti
         }
 
     @app.post("/api/recovery/execute")
-    def execute_recovery(body: RecoveryAction) -> dict:
+    def execute_recovery(body: RecoveryAction, request: Request) -> dict:
+        quota.consume(client_ip(request))
         did_hash, _document, recovery = resolve(body.did)
         if recovery is None or recovery["executed"] or recovery["cancelled"]:
             raise HttpError(404, "no pending recovery request", "no_pending")
@@ -241,7 +253,8 @@ def build_app(adapter, db: Database, guardians: GuardianService, settings: Setti
         }
 
     @app.post("/api/recovery/cancel")
-    def cancel_recovery(body: RecoveryAction) -> dict:
+    def cancel_recovery(body: RecoveryAction, request: Request) -> dict:
+        quota.consume(client_ip(request))
         did_hash, _document, recovery = resolve(body.did)
         if recovery is None or recovery["executed"] or recovery["cancelled"]:
             raise HttpError(404, "no pending recovery request", "no_pending")

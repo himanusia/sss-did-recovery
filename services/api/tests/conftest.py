@@ -45,7 +45,7 @@ def database():
 def clean(database):
     with database.connection() as conn:
         conn.execute(
-            "TRUNCATE challenges, sessions, guardian_envelopes, share_requests, relay_locks, guardians"
+            "TRUNCATE challenges, sessions, guardian_envelopes, share_requests, relay_locks, relay_quota, guardians"
         )
     yield
 
@@ -70,6 +70,7 @@ def settings() -> Settings:
         database_url=test_database_url(),
         challenge_ttl_seconds=120,
         session_ttl_seconds=900,
+        relay_quota_per_hour=1000,
     )
 
 
