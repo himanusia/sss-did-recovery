@@ -44,7 +44,7 @@ services:
       - ./infra/besu/networkFiles/genesis.json:/config/genesis.json:ro
       - ./infra/besu/networkFiles/keys/0x4c063c5ee9c9c9dcefbeab4b4d21f0b6539be66e/key:/config/key:ro
     ports:
-      - "8545:8545"
+      - "127.0.0.1:8545:8545"
     environment:
       BESU_P2P_HOST: 172.28.0.11
     networks:
@@ -109,7 +109,7 @@ services:
       RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
       GUARDIAN_COUNT: ${GUARDIAN_COUNT:-5}
     ports:
-      - "8788:8788"
+      - "127.0.0.1:8788:8788"
     networks:
       - default
       - besu
@@ -124,7 +124,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     ports:
-      - "8080:80"
+      - "${WEB_BIND:-127.0.0.1}:8080:80"
     depends_on:
       api:
         condition: service_started
